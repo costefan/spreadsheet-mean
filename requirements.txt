@@ -1,0 +1,5 @@
+google-api-python-client-py3
+apiclient
+pandas
+pytest
+python-dateutil
