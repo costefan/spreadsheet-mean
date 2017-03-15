@@ -1,16 +1,17 @@
 import argparse
-import httplib2
 import os
-import pandas as pd
-import json
 
+import googleapiclient
+import httplib2
+import pandas as pd
 from apiclient import discovery
 from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
 
-from validators.file_validation import FileValidator
 from calc import Calculator
+from request.requests import make_requests_body
+from validators.file_validation import FileValidator
 
 try:
     parser = argparse.ArgumentParser(parents=[tools.argparser])
@@ -38,7 +39,7 @@ def _get_service_n_spreadsheet():
     return service, spreadsheet_id
 
 
-def parse_file(df: pd.DataFrame):
+def parse_file(df):
 
     validator = FileValidator(df)
     df = validator()
@@ -49,19 +50,23 @@ def parse_file(df: pd.DataFrame):
             [item if not isinstance(item, pd.tslib.Timestamp)
              else str(item.date()) for item in row]
         )
-    service, spreadsheet_id = _get_service_n_spreadsheet()
 
-    service.spreadsheets().batchUpdate(
-        {
-            "addSheet": {
-                "properties": {
-                  "sheetId": spreadsheet_id,
-                  "title": "Title",
+    return inserted_df
 
-                }
-        }
-        }
-    ).execute()
+
+def _get_sheet_name(service, spreadsheet_id):
+    """Bad hack to get sheet name
+    cause of problem with A1 notation
+    :param service:
+    :param spreadsheet_id:
+    :return:
+    """
+    fake_range_name = 'A1:C10'
+
+    return service.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=fake_range_name
+    ).execute().get('valueRanges')[0].get('range').split('!')[0].strip('\'')
 
 
 def get_credentials():
@@ -88,21 +93,35 @@ def get_credentials():
 
 
 def main():
-    """Shows basic usage of the Sheets API.
+    """ Main method that gets sheet, parses it, and updates
     """
     service, spreadsheet_id = _get_service_n_spreadsheet()
-    range_name = 'First'
+    sheet_name = _get_sheet_name(service, spreadsheet_id)
+
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=range_name,
+        range=sheet_name,
         majorDimension='ROWS'
     ).execute()
 
-    data = pd.DataFrame(
-        result.get('values'), columns=result.get('values').pop(0)
-    )
-    parse_file(data)
+    inserted_df = parse_file(result)
 
+    add_sheet_request, insert_content_request = make_requests_body(
+        inserted_df
+    )
+    # I created a new sheet cause of deleting data if it's not valid
+    try:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body=add_sheet_request
+        ).execute()
+    except googleapiclient.errors.HttpError as err:
+        print(err)
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body=insert_content_request
+    ).execute()
 
 if __name__ == '__main__':
     main()

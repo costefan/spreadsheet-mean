@@ -1,0 +1,2 @@
+NEW_SHEET_NAME = 'New sheet'
+NEW_SHEET_ID = 1
